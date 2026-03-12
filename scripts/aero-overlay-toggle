@@ -1,0 +1,21 @@
+#!/bin/bash
+# Toggle AeroOverlay visibility, launching if not running
+PID_FILE="$HOME/.local/state/aerooverlay.pid"
+BINARY="$HOME/.local/bin/AeroOverlay"
+
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        kill -SIGUSR1 "$PID"
+        exit 0
+    fi
+fi
+
+# Not running — launch it
+if [ -x "$BINARY" ]; then
+    "$BINARY" &
+    disown
+else
+    echo "AeroOverlay binary not found at $BINARY" >&2
+    exit 1
+fi
