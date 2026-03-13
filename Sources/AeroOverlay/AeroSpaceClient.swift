@@ -22,17 +22,52 @@ final class AeroSpaceClient {
     private let aerospacePath = "/opt/homebrew/bin/aerospace"
 
     func fetchAll() -> [WorkspaceInfo] {
-        let workspaces = listWorkspaces()
-        let focused = focusedWorkspace()
-        let monitors = listMonitors()
-        // Build workspace→monitor mapping by querying windows per monitor
+        // Run initial queries in parallel
+        var workspaces: [String] = []
+        var focused: String?
+        var monitors: [MonitorInfo] = []
+
+        let group1 = DispatchGroup()
+
+        group1.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            workspaces = self.listWorkspaces()
+            group1.leave()
+        }
+        group1.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            focused = self.focusedWorkspace()
+            group1.leave()
+        }
+        group1.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            monitors = self.listMonitors()
+            group1.leave()
+        }
+        group1.wait()
+
+        // Run per-workspace window queries and monitor map in parallel
         let monitorWorkspaces = buildMonitorWorkspaceMap(monitors: monitors)
+        var windowsMap: [String: [WindowInfo]] = [:]
+        let lock = NSLock()
+        let group2 = DispatchGroup()
+
+        for ws in workspaces {
+            group2.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let windows = self.listWindows(workspace: ws)
+                lock.lock()
+                windowsMap[ws] = windows
+                lock.unlock()
+                group2.leave()
+            }
+        }
+        group2.wait()
 
         return workspaces.map { ws in
-            let windows = listWindows(workspace: ws)
-            return WorkspaceInfo(
+            WorkspaceInfo(
                 name: ws,
-                windows: windows,
+                windows: windowsMap[ws] ?? [],
                 isFocused: ws == focused,
                 monitorName: monitorWorkspaces[ws]
             )

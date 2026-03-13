@@ -41,6 +41,7 @@ final class OverlayViewController: NSViewController {
         let allWorkspaces = client.fetchAll()
         let wsMap = Dictionary(uniqueKeysWithValues: allWorkspaces.map { ($0.name, $0) })
         let activeNames = Set(allWorkspaces.filter { !$0.windows.isEmpty }.map { $0.name })
+        let notifiedWorkspaces = OverlayNotifications.pending()
 
         // Find the next inactive workspace in grid order
         let allNamesInOrder = gridRows.flatMap { $0 }
@@ -56,14 +57,47 @@ final class OverlayViewController: NSViewController {
         outerStack.orientation = .vertical
         outerStack.alignment = .leading
         outerStack.spacing = 10
+        outerStack.distribution = .fill
         outerStack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(outerStack)
 
-        // Title
+        // Header row: title on left, stats on right
+        let stats = SystemStats.fetch()
+
+        let headerContainer = NSView()
+        headerContainer.translatesAutoresizingMaskIntoConstraints = false
+
         let title = NSTextField(labelWithString: "Workspaces")
         title.font = .systemFont(ofSize: 20, weight: .semibold)
         title.textColor = .white
-        outerStack.addArrangedSubview(title)
+        title.translatesAutoresizingMaskIntoConstraints = false
+        headerContainer.addSubview(title)
+
+        // Right-side stats
+        var statParts: [String] = []
+        statParts.append("CPU \(Int(stats.cpuUsage))%")
+        statParts.append(String(format: "RAM %.1f/%.0fGB", stats.memUsedGB, stats.memTotalGB))
+        if let batt = stats.batteryPercent {
+            let icon = stats.batteryCharging ? "⚡" : ""
+            statParts.append("\(icon)\(batt)%")
+        }
+
+        let statsLabel = NSTextField(labelWithString: statParts.joined(separator: "  ·  "))
+        statsLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        statsLabel.textColor = .secondaryLabelColor
+        statsLabel.translatesAutoresizingMaskIntoConstraints = false
+        headerContainer.addSubview(statsLabel)
+
+        NSLayoutConstraint.activate([
+            title.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
+            title.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor),
+            statsLabel.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
+            statsLabel.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor),
+            statsLabel.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 20),
+            headerContainer.heightAnchor.constraint(equalToConstant: 28),
+        ])
+
+        outerStack.addArrangedSubview(headerContainer)
 
         for row in gridRows {
             let visibleInRow = row.filter { visibleNames.contains($0) }
@@ -75,31 +109,36 @@ final class OverlayViewController: NSViewController {
             var cells: [WorkspaceCell] = []
             for wsName in visibleInRow {
                 let ws = wsMap[wsName] ?? WorkspaceInfo(name: wsName, windows: [], isFocused: false, monitorName: nil)
-                let cell = WorkspaceCell(workspace: ws)
+                let cell = WorkspaceCell(workspace: ws, hasNotification: notifiedWorkspaces.contains(wsName))
                 cell.onClick = { [weak self] name in
                     self?.onSelectWorkspace?(name)
                 }
                 cell.translatesAutoresizingMaskIntoConstraints = false
+                cell.setContentCompressionResistancePriority(.init(1), for: .horizontal)
                 rowContainer.addSubview(cell)
+                let widthConstraint = cell.widthAnchor.constraint(equalToConstant: 150)
+                widthConstraint.priority = .required
                 NSLayoutConstraint.activate([
                     cell.leadingAnchor.constraint(equalTo: rowContainer.leadingAnchor, constant: xOffset),
                     cell.topAnchor.constraint(equalTo: rowContainer.topAnchor),
-                    cell.widthAnchor.constraint(equalToConstant: 130),
+                    widthConstraint,
                     cell.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
                 ])
                 cells.append(cell)
-                xOffset += 140 // 130 + 10 spacing
+                xOffset += 160 // 150 + 10 spacing
             }
 
             // Container sized to fit content
             let totalWidth = max(0, xOffset - 10)
             rowContainer.widthAnchor.constraint(equalToConstant: totalWidth).isActive = true
-            // Height matches tallest cell
-            if let lastCell = cells.last {
-                rowContainer.bottomAnchor.constraint(greaterThanOrEqualTo: lastCell.bottomAnchor).isActive = true
-            }
+            // Pin height to tallest cell (equalTo, not greaterThan)
             for cell in cells {
-                rowContainer.bottomAnchor.constraint(greaterThanOrEqualTo: cell.bottomAnchor).isActive = true
+                let bottom = cell.bottomAnchor.constraint(lessThanOrEqualTo: rowContainer.bottomAnchor)
+                bottom.priority = .required
+                bottom.isActive = true
+                let bottomPin = rowContainer.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
+                bottomPin.priority = .defaultHigh
+                bottomPin.isActive = true
             }
 
             // Prevent row from stretching vertically
@@ -115,6 +154,92 @@ final class OverlayViewController: NSViewController {
         spacer.translatesAutoresizingMaskIntoConstraints = false
         spacer.setContentHuggingPriority(.init(1), for: .vertical)
         outerStack.addArrangedSubview(spacer)
+
+        // Footer
+        let footerContainer = NSView()
+        footerContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        // Left: focused workspace info
+        let focusedWs = allWorkspaces.first { $0.isFocused }
+        let focusedText = focusedWs.map { "Focused: \($0.name.uppercased())" } ?? ""
+        let focusedLabel = NSTextField(labelWithString: focusedText)
+        focusedLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+        focusedLabel.textColor = .secondaryLabelColor
+        focusedLabel.translatesAutoresizingMaskIntoConstraints = false
+        footerContainer.addSubview(focusedLabel)
+
+        // Right side: time + Claude usage bar
+        let rightStack = NSStackView()
+        rightStack.orientation = .horizontal
+        rightStack.spacing = 14
+        rightStack.alignment = .centerY
+        rightStack.translatesAutoresizingMaskIntoConstraints = false
+        footerContainer.addSubview(rightStack)
+
+        // Time
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE MMM d · h:mm a"
+        let timeLabel = NSTextField(labelWithString: formatter.string(from: Date()))
+        timeLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        timeLabel.textColor = .tertiaryLabelColor
+        rightStack.addArrangedSubview(timeLabel)
+
+        // Claude Code segmented usage bar (always shown, 0% if fetch fails)
+        let pct = ClaudeUsage.fetch()?.sevenDayPercent ?? 0
+
+        let ccBar = NSStackView()
+        ccBar.orientation = .horizontal
+        ccBar.spacing = 6
+        ccBar.alignment = .centerY
+
+        let ccLabel = NSTextField(labelWithString: "Claude Code")
+        ccLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+        ccLabel.textColor = .secondaryLabelColor
+        ccBar.addArrangedSubview(ccLabel)
+
+        let totalBlocks = 10
+        let filledBlocks = max(Int((Double(pct) / 100.0) * Double(totalBlocks) + 0.5), pct > 0 ? 1 : 0)
+        let fillColor: NSColor = pct >= 90 ? .systemRed : .systemOrange
+
+        let blocksRow = NSStackView()
+        blocksRow.orientation = .horizontal
+        blocksRow.spacing = 2
+        blocksRow.alignment = .centerY
+
+        for i in 0..<totalBlocks {
+            let block = NSView()
+            block.wantsLayer = true
+            block.layer?.cornerRadius = 2
+            if i < filledBlocks {
+                block.layer?.backgroundColor = fillColor.cgColor
+            } else {
+                block.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
+            }
+            block.translatesAutoresizingMaskIntoConstraints = false
+            block.widthAnchor.constraint(equalToConstant: 10).isActive = true
+            block.heightAnchor.constraint(equalToConstant: 12).isActive = true
+            blocksRow.addArrangedSubview(block)
+        }
+
+        ccBar.addArrangedSubview(blocksRow)
+
+        let pctLabel = NSTextField(labelWithString: "\(pct)% of 7D")
+        pctLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
+        pctLabel.textColor = fillColor
+        ccBar.addArrangedSubview(pctLabel)
+
+        rightStack.addArrangedSubview(ccBar)
+
+        NSLayoutConstraint.activate([
+            focusedLabel.leadingAnchor.constraint(equalTo: footerContainer.leadingAnchor),
+            focusedLabel.centerYAnchor.constraint(equalTo: footerContainer.centerYAnchor),
+            rightStack.trailingAnchor.constraint(equalTo: footerContainer.trailingAnchor),
+            rightStack.centerYAnchor.constraint(equalTo: footerContainer.centerYAnchor),
+            footerContainer.heightAnchor.constraint(equalToConstant: 24),
+        ])
+
+        footerContainer.setContentHuggingPriority(.required, for: .vertical)
+        outerStack.addArrangedSubview(footerContainer)
 
         // Default selection to the focused workspace
         var foundFocused = false
@@ -133,10 +258,12 @@ final class OverlayViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             outerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
-            outerStack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -20),
-            outerStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 20),
-            outerStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
-            outerStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            outerStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20),
+            outerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            outerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            // Header and footer stretch to full width
+            headerContainer.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
+            footerContainer.trailingAnchor.constraint(equalTo: outerStack.trailingAnchor),
         ])
     }
 

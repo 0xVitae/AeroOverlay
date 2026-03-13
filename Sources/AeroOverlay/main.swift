@@ -9,6 +9,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isVisible = false
     private let client = AeroSpaceClient()
     private var signalSource: DispatchSourceSignal?
+    private var globalKeyMonitor: Any?
+    private var localKeyMonitor: Any?
+    private var lastOptionKeyDown: Date?
+    private let doubleTapInterval: TimeInterval = 0.3
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide from Dock
@@ -18,9 +22,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel = OverlayPanel()
         viewController = OverlayViewController()
         panel.contentViewController = viewController
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
         panel.onDismiss = { [weak self] in self?.dismiss() }
 
         viewController.onSelectWorkspace = { [weak self] name in
+            OverlayNotifications.clear(workspace: name)
             self?.dismiss {
                 self?.client.switchWorkspace(name)
             }
@@ -35,6 +42,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Double-tap Option key hotkey
+        setupOptionKeyMonitor()
+
         // Setup SIGUSR1 handler
         setupSignalHandler()
 
@@ -48,6 +58,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         let pidPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/state/aerooverlay.pid").path
         try? FileManager.default.removeItem(atPath: pidPath)
+    }
+
+    private func handleOptionKey() {
+        let now = Date()
+        if let last = self.lastOptionKeyDown, now.timeIntervalSince(last) < self.doubleTapInterval {
+            self.lastOptionKeyDown = nil
+            self.toggle()
+        } else {
+            self.lastOptionKeyDown = now
+        }
+    }
+
+    private func setupOptionKeyMonitor() {
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self = self else { return }
+            if event.modifierFlags.contains(.option) {
+                self.handleOptionKey()
+            }
+        }
+
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self = self else { return event }
+            if event.modifierFlags.contains(.option) {
+                self.handleOptionKey()
+            }
+            return event
+        }
     }
 
     private func setupSignalHandler() {

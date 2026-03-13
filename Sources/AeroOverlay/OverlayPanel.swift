@@ -20,6 +20,7 @@ final class OverlayPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         isMovableByWindowBackground = false
         animationBehavior = .utilityWindow
+
     }
 
     override var canBecomeKey: Bool { true }
@@ -38,9 +39,15 @@ final class OverlayPanel: NSPanel {
         guard let screen = NSScreen.main else { return }
         let screenFrame = screen.visibleFrame
 
-        // Size the panel to ~70% of screen, centered
-        let panelWidth = min(screenFrame.width * 0.7, 1200)
-        let panelHeight = min(screenFrame.height * 0.7, 800)
+        // First pass: set a large frame so content can layout freely
+        setFrame(NSRect(x: 0, y: 0, width: screenFrame.width, height: screenFrame.height), display: false)
+        contentView?.layoutSubtreeIfNeeded()
+
+        // Get the content's fitted size
+        let fittingSize = contentView?.fittingSize ?? CGSize(width: 600, height: 400)
+        let panelWidth = min(fittingSize.width + 40, screenFrame.width * 0.9)
+        let panelHeight = min(fittingSize.height + 40, screenFrame.height * 0.9)
+
         let x = screenFrame.midX - panelWidth / 2
         let y = screenFrame.midY - panelHeight / 2
 
