@@ -89,7 +89,6 @@ Notifications clear automatically when you select the workspace in the overlay.
 | Script | Description |
 |--------|-------------|
 | `scripts/aero-overlay-toggle` | Toggle overlay visibility, launching if not running |
-| `scripts/karabiner-rule.json` | Karabiner-Elements rule for double-tap Option (alternative to built-in hotkey) |
 
 ## License
 
