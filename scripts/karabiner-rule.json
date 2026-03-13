@@ -21,7 +21,7 @@
             ],
             "to_if_alone": [
                 {
-                    "shell_command": "/Users/0xvitae/.local/bin/aero-overlay-toggle"
+                    "shell_command": "/bin/bash -c '$HOME/.local/bin/aero-overlay-toggle'"
                 },
                 {
                     "set_variable": {
