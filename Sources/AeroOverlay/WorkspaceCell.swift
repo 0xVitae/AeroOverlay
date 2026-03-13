@@ -29,13 +29,15 @@ final class WorkspaceCell: NSView {
     var isFocusedWorkspace: Bool { workspace.isFocused }
     var workspaceName: String { workspace.name }
     private let hasNotification: Bool
+    private let notifiedWindowIDs: Set<Int>
     private var gradientBorderLayer: CAGradientLayer?
     private var selectionBorderLayer: CAGradientLayer?
     private var badgeView: NSTextField?
 
-    init(workspace: WorkspaceInfo, hasNotification: Bool = false) {
+    init(workspace: WorkspaceInfo, hasNotification: Bool = false, notifiedWindowIDs: Set<Int> = []) {
         self.workspace = workspace
         self.hasNotification = hasNotification
+        self.notifiedWindowIDs = notifiedWindowIDs
         super.init(frame: .zero)
         setupUI()
     }
@@ -117,8 +119,8 @@ final class WorkspaceCell: NSView {
                 row.addArrangedSubview(iconView)
             }
 
-            // Orange dot next to terminal-type apps when workspace has a TODO
-            if hasNotification && Self.isTerminalApp(win.appName) {
+            // Orange dot next to the specific terminal window that triggered the notification
+            if notifiedWindowIDs.contains(win.windowID) {
                 let dot = NSView()
                 dot.wantsLayer = true
                 dot.layer?.cornerRadius = 3

@@ -115,7 +115,11 @@ final class OverlayViewController: NSViewController {
             var cells: [WorkspaceCell] = []
             for wsName in visibleInRow {
                 let ws = wsMap[wsName] ?? WorkspaceInfo(name: wsName, windows: [], isFocused: false, monitorName: nil)
-                let cell = WorkspaceCell(workspace: ws, hasNotification: notifiedWorkspaces.contains(wsName))
+                let cell = WorkspaceCell(
+                    workspace: ws,
+                    hasNotification: notifiedWorkspaces.contains(wsName),
+                    notifiedWindowIDs: OverlayNotifications.notifiedWindowIDs(workspace: wsName)
+                )
                 cell.onClick = { [weak self] name in
                     self?.onSelectWorkspace?(name)
                 }
