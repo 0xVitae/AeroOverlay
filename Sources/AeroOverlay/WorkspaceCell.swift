@@ -30,21 +30,47 @@ final class WorkspaceCell: NSView {
     var workspaceName: String { workspace.name }
     private let hasNotification: Bool
     private let notifiedWindowIDs: Set<Int>
+    let isBlank: Bool
     private var gradientBorderLayer: CAGradientLayer?
     private var focusBorderLayer: CAGradientLayer?
     private var selectionBorderLayer: CAGradientLayer?
     private var badgeView: NSTextField?
 
-    init(workspace: WorkspaceInfo, hasNotification: Bool = false, notifiedWindowIDs: Set<Int> = []) {
+    init(workspace: WorkspaceInfo, hasNotification: Bool = false, notifiedWindowIDs: Set<Int> = [], isBlank: Bool = false) {
         self.workspace = workspace
         self.hasNotification = hasNotification
         self.notifiedWindowIDs = notifiedWindowIDs
+        self.isBlank = isBlank
         super.init(frame: .zero)
-        setupUI()
+        if isBlank {
+            setupBlankUI()
+        } else {
+            setupUI()
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    private func setupBlankUI() {
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.02).cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.04).cgColor
+        layer?.borderWidth = 1
+
+        label.stringValue = workspace.name.uppercased()
+        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        label.textColor = NSColor.white.withAlphaComponent(0.15)
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+        ])
+    }
 
     private func setupUI() {
         wantsLayer = true
@@ -329,106 +355,47 @@ final class WorkspaceCell: NSView {
         terminalAppNames.contains(appName)
     }
 
-    /// Map of windowID → cwd, built once per reload using sorted window-id / shell-pid matching.
+    /// Map of windowID → cwd, built once per reload using AXDocument attribute.
     private static var windowCwdMap: [Int: String] = [:]
+
+    @_silgen_name("_AXUIElementGetWindow")
+    private static func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
 
     /// Call before creating cells to build the windowID→cwd map for all terminal windows.
     static func buildTerminalCwdMap(allWorkspaces: [WorkspaceInfo]) {
         windowCwdMap.removeAll()
 
-        // Group terminal windows by app name, sorted by window-id (creation order)
-        var termWindowsByApp: [String: [Int]] = [:]
+        // Collect terminal app names that have windows
+        var termApps: Set<String> = []
         for ws in allWorkspaces {
             for win in ws.windows {
                 if isTerminalApp(win.appName) {
-                    termWindowsByApp[win.appName, default: []].append(win.windowID)
+                    termApps.insert(win.appName)
                 }
             }
         }
 
-        for (appName, windowIDs) in termWindowsByApp {
-            let sortedWindowIDs = windowIDs.sorted() // ascending = older first
-            let cwds = fetchAllShellCwds(for: appName) // sorted by PID = older first
-            log("buildTerminalCwdMap: \(appName) windows=\(sortedWindowIDs) cwds=\(cwds)")
-            for (i, wid) in sortedWindowIDs.enumerated() {
-                if i < cwds.count {
-                    windowCwdMap[wid] = cwds[i]
+        // For each terminal app, use AXDocument to get per-window cwd
+        for appName in termApps {
+            guard let runningApp = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == appName }) else { continue }
+            let axApp = AXUIElementCreateApplication(runningApp.processIdentifier)
+            var windowsRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
+            guard let axWindows = windowsRef as? [AXUIElement] else { continue }
+
+            for win in axWindows {
+                var windowID: CGWindowID = 0
+                guard _AXUIElementGetWindow(win, &windowID) == .success else { continue }
+
+                var docRef: CFTypeRef?
+                AXUIElementCopyAttributeValue(win, "AXDocument" as CFString, &docRef)
+                if let doc = docRef as? String,
+                   let url = URL(string: doc) {
+                    windowCwdMap[Int(windowID)] = url.path
                 }
             }
         }
         log("buildTerminalCwdMap: final map=\(windowCwdMap)")
-    }
-
-    /// Find PIDs for a terminal app by matching against `ps` output.
-    private static func findAppPids(_ appName: String) -> [Int] {
-        guard let psOutput = runShell("/bin/ps", ["-eo", "pid,comm"]) else { return [] }
-        return psOutput.split(separator: "\n").compactMap { line -> Int? in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let parts = trimmed.split(separator: " ", maxSplits: 1)
-            guard parts.count == 2, let pid = Int(parts[0]) else { return nil }
-            let comm = String(parts[1])
-            if comm.localizedCaseInsensitiveContains(appName),
-               (comm.contains(".app/Contents/MacOS/") || comm.hasSuffix("/\(appName.lowercased())")) {
-                return pid
-            }
-            return nil
-        }
-    }
-
-    /// Walk the process tree to find all shell cwds under a terminal app, sorted by PID.
-    private static func fetchAllShellCwds(for appName: String) -> [String] {
-        let matchedPids = findAppPids(appName)
-        // Collect (shellPid, cwd) pairs so we can sort by PID
-        var pidCwdPairs: [(pid: Int, cwd: String)] = []
-
-        for termPid in matchedPids {
-            guard let childOut = runShell("/usr/bin/pgrep", ["-P", "\(termPid)"]) else { continue }
-            let childPids = childOut.split(separator: "\n").compactMap { Int(String($0).trimmingCharacters(in: .whitespaces)) }
-
-            for childPid in childPids {
-                guard let shellOut = runShell("/usr/bin/pgrep", ["-P", "\(childPid)"]) else { continue }
-                let shellPids = shellOut.split(separator: "\n").compactMap { Int(String($0).trimmingCharacters(in: .whitespaces)) }
-
-                for shellPid in shellPids {
-                    if let cwd = getCwdForPid(shellPid), cwd != "/" {
-                        pidCwdPairs.append((pid: shellPid, cwd: cwd))
-                    }
-                }
-            }
-        }
-
-        // Sort by PID (creation order) to match window-id sort order
-        return pidCwdPairs.sorted { $0.pid < $1.pid }.map { $0.cwd }
-    }
-
-    private static func getCwdForPid(_ pid: Int) -> String? {
-        let info = UnsafeMutablePointer<proc_vnodepathinfo>.allocate(capacity: 1)
-        defer { info.deallocate() }
-        let size = proc_pidinfo(pid_t(pid), PROC_PIDVNODEPATHINFO, 0, info, Int32(MemoryLayout<proc_vnodepathinfo>.size))
-        guard size == MemoryLayout<proc_vnodepathinfo>.size else { return nil }
-        return withUnsafePointer(to: &info.pointee.pvi_cdir.vip_path) {
-            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
-                String(cString: $0)
-            }
-        }
-    }
-
-    private static func runShell(_ path: String, _ arguments: [String]) -> String? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            return nil
-        }
     }
 
     private func truncate(_ s: String, max: Int) -> String {

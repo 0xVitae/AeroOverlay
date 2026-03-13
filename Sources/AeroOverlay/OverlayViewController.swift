@@ -11,9 +11,8 @@ final class OverlayViewController: NSViewController {
     // Keyboard-matching grid layout
     private let gridRows: [[String]] = [
         ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
-        ["q", "w", "e", "r", "t", "y"],
+        ["q", "w", "e", "r", "t", "y", "o"],
         ["a", "s", "d", "f"],
-        ["o"],
     ]
 
     override func loadView() {
@@ -123,19 +122,73 @@ final class OverlayViewController: NSViewController {
         outerStack.addArrangedSubview(headerContainer)
 
         for row in gridRows {
-            let visibleInRow = row.filter { visibleNames.contains($0) }
-            if visibleInRow.isEmpty { continue }
+            var visibleInRow = row.filter { visibleNames.contains($0) }
+            // Always show first key of each row as blank if row is empty
+            if visibleInRow.isEmpty {
+                visibleInRow = []
+                let slot = (name: row[0], blank: true)
+                let rowContainer = NSView()
+                rowContainer.translatesAutoresizingMaskIntoConstraints = false
+                var cells: [WorkspaceCell] = []
+                let ws = WorkspaceInfo(name: slot.name, windows: [], isFocused: false, monitorName: nil)
+                let cell = WorkspaceCell(workspace: ws, isBlank: true)
+                cell.onClick = { [weak self] name in self?.onSelectWorkspace?(name) }
+                cell.translatesAutoresizingMaskIntoConstraints = false
+                cell.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+                rowContainer.addSubview(cell)
+                let widthConstraint = cell.widthAnchor.constraint(equalToConstant: 150)
+                widthConstraint.priority = .required
+                NSLayoutConstraint.activate([
+                    cell.leadingAnchor.constraint(equalTo: rowContainer.leadingAnchor),
+                    cell.topAnchor.constraint(equalTo: rowContainer.topAnchor),
+                    widthConstraint,
+                    cell.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
+                ])
+                cells.append(cell)
+                rowContainer.widthAnchor.constraint(equalToConstant: 150).isActive = true
+                let bottom = cell.bottomAnchor.constraint(lessThanOrEqualTo: rowContainer.bottomAnchor)
+                bottom.priority = .required
+                bottom.isActive = true
+                let bottomPin = rowContainer.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
+                bottomPin.priority = .defaultHigh
+                bottomPin.isActive = true
+                rowContainer.setContentHuggingPriority(.required, for: .vertical)
+                rowContainer.setContentCompressionResistancePriority(.required, for: .vertical)
+                visibleGrid.append(cells)
+                outerStack.addArrangedSubview(rowContainer)
+                continue
+            }
+
+            // Build slot list: visible workspaces with one blank between non-adjacent ones
+            var slotKeys: [(name: String, blank: Bool)] = []
+            for (i, wsName) in visibleInRow.enumerated() {
+                if i > 0 {
+                    let prevIdx = row.firstIndex(of: visibleInRow[i - 1])!
+                    let curIdx = row.firstIndex(of: wsName)!
+                    if curIdx - prevIdx > 1 {
+                        // Add one blank: the next key after the previous visible
+                        let blankKey = row[prevIdx + 1]
+                        slotKeys.append((name: blankKey, blank: true))
+                    }
+                }
+                slotKeys.append((name: wsName, blank: false))
+            }
 
             let rowContainer = NSView()
             rowContainer.translatesAutoresizingMaskIntoConstraints = false
             var xOffset: CGFloat = 0
             var cells: [WorkspaceCell] = []
-            for wsName in visibleInRow {
-                let ws = wsMap[wsName] ?? WorkspaceInfo(name: wsName, windows: [], isFocused: false, monitorName: nil)
+            for slot in slotKeys {
+                let wsName = slot.name
+                let isVisible = !slot.blank
+                let ws = isVisible
+                    ? (wsMap[wsName] ?? WorkspaceInfo(name: wsName, windows: [], isFocused: false, monitorName: nil))
+                    : WorkspaceInfo(name: wsName, windows: [], isFocused: false, monitorName: nil)
                 let cell = WorkspaceCell(
                     workspace: ws,
                     hasNotification: notifiedWorkspaces.contains(wsName),
-                    notifiedWindowIDs: OverlayNotifications.notifiedWindowIDs(workspace: wsName)
+                    notifiedWindowIDs: OverlayNotifications.notifiedWindowIDs(workspace: wsName),
+                    isBlank: !isVisible
                 )
                 cell.onClick = { [weak self] name in
                     self?.onSelectWorkspace?(name)
@@ -158,14 +211,19 @@ final class OverlayViewController: NSViewController {
             // Container sized to fit content
             let totalWidth = max(0, xOffset - 10)
             rowContainer.widthAnchor.constraint(equalToConstant: totalWidth).isActive = true
-            // Pin height to tallest cell (equalTo, not greaterThan)
+            // Pin height to tallest cell; blank cells match row height
             for cell in cells {
                 let bottom = cell.bottomAnchor.constraint(lessThanOrEqualTo: rowContainer.bottomAnchor)
                 bottom.priority = .required
                 bottom.isActive = true
-                let bottomPin = rowContainer.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
-                bottomPin.priority = .defaultHigh
-                bottomPin.isActive = true
+                if cell.isBlank {
+                    // Force blank cells to fill the row height
+                    cell.bottomAnchor.constraint(equalTo: rowContainer.bottomAnchor).isActive = true
+                } else {
+                    let bottomPin = rowContainer.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
+                    bottomPin.priority = .defaultHigh
+                    bottomPin.isActive = true
+                }
             }
 
             // Prevent row from stretching vertically
@@ -340,17 +398,40 @@ final class OverlayViewController: NSViewController {
                 selRow = targetRow
                 // Clamp column to new row's bounds
                 selCol = min(selCol, visibleGrid[selRow].count - 1)
+                // Skip blank cells
+                if visibleGrid[selRow][selCol].isBlank {
+                    if let next = nearestNonBlank(row: selRow, from: selCol) {
+                        selCol = next
+                    }
+                }
                 updateSelection()
             }
         } else {
             // Horizontal movement
             let row = visibleGrid[selRow]
-            let targetCol = max(0, min(newCol, row.count - 1))
-            if targetCol != selCol {
+            var targetCol = max(0, min(newCol, row.count - 1))
+            // Skip over blank cells in the direction of movement
+            while targetCol >= 0 && targetCol < row.count && row[targetCol].isBlank {
+                targetCol += dCol
+            }
+            targetCol = max(0, min(targetCol, row.count - 1))
+            if targetCol != selCol && !row[targetCol].isBlank {
                 selCol = targetCol
                 updateSelection()
             }
         }
+    }
+
+    private func nearestNonBlank(row: Int, from col: Int) -> Int? {
+        let cells = visibleGrid[row]
+        // Search outward from col
+        for offset in 0..<cells.count {
+            let left = col - offset
+            let right = col + offset
+            if left >= 0 && !cells[left].isBlank { return left }
+            if right < cells.count && !cells[right].isBlank { return right }
+        }
+        return nil
     }
 
     private func updateSelection() {
@@ -364,6 +445,7 @@ final class OverlayViewController: NSViewController {
     private func confirmSelection() {
         guard selRow < visibleGrid.count, selCol < visibleGrid[selRow].count else { return }
         let cell = visibleGrid[selRow][selCol]
+        guard !cell.isBlank else { return }
         onSelectWorkspace?(cell.workspaceName)
     }
 
