@@ -21,9 +21,23 @@ final class OverlayViewController: NSViewController {
         bg.blendingMode = .behindWindow
         bg.state = .active
         bg.wantsLayer = true
-        bg.layer?.cornerRadius = 16
-        bg.layer?.masksToBounds = true
+        bg.maskImage = Self.roundedCornerMask(radius: 16)
         self.view = bg
+    }
+
+    /// Creates a mask image for NSVisualEffectView that produces true rounded corners
+    /// without the square window backing showing through.
+    private static func roundedCornerMask(radius: CGFloat) -> NSImage {
+        let edgeLen = 2.0 * radius + 1.0
+        let image = NSImage(size: NSSize(width: edgeLen, height: edgeLen), flipped: false) { rect in
+            let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+            NSColor.black.set()
+            path.fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 
     override func viewDidLoad() {

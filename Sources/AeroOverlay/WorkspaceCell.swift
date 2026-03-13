@@ -31,6 +31,7 @@ final class WorkspaceCell: NSView {
     private let hasNotification: Bool
     private let notifiedWindowIDs: Set<Int>
     private var gradientBorderLayer: CAGradientLayer?
+    private var focusBorderLayer: CAGradientLayer?
     private var selectionBorderLayer: CAGradientLayer?
     private var badgeView: NSTextField?
 
@@ -54,9 +55,8 @@ final class WorkspaceCell: NSView {
             layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.06).cgColor
             // Gradient border added in layout
         } else if workspace.isFocused {
-            layer?.borderColor = NSColor.systemBlue.cgColor
-            layer?.borderWidth = 2.5
             layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            // Gradient border added in layout
         } else if workspace.windows.isEmpty {
             layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
             layer?.borderColor = NSColor.white.withAlphaComponent(0.06).cgColor
@@ -68,12 +68,29 @@ final class WorkspaceCell: NSView {
         }
 
         // Workspace label
+        let isExternal = workspace.monitorName != nil && workspace.monitorName != NSScreen.main?.localizedName
+
         label.stringValue = workspace.name.uppercased()
         label.font = .systemFont(ofSize: 16, weight: workspace.isFocused ? .bold : .semibold)
         label.textColor = workspace.isFocused ? .white : (workspace.windows.isEmpty ? .tertiaryLabelColor : .secondaryLabelColor)
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
+
+        // External monitor icon positioned to the right of the label
+        if isExternal {
+            if let symbolImage = NSImage(systemSymbolName: "display", accessibilityDescription: "External monitor") {
+                let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+                let icon = NSImageView(image: symbolImage.withSymbolConfiguration(config) ?? symbolImage)
+                icon.contentTintColor = .tertiaryLabelColor
+                icon.translatesAutoresizingMaskIntoConstraints = false
+                addSubview(icon)
+                NSLayoutConstraint.activate([
+                    icon.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 3),
+                    icon.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+                ])
+            }
+        }
 
         // "TODO" badge inline on the top border
         if hasNotification {
@@ -148,7 +165,7 @@ final class WorkspaceCell: NSView {
         }
 
         // Pin bottom to define intrinsic height
-        let bottomAnchorView = workspace.windows.isEmpty ? label : windowStack
+        let bottomAnchorView: NSView = workspace.windows.isEmpty ? label : windowStack
         let bottomPin = bottomAnchorView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
         bottomPin.priority = .defaultHigh // Allow min height to win if content is tiny
 
@@ -164,7 +181,10 @@ final class WorkspaceCell: NSView {
         setContentHuggingPriority(.required, for: .vertical)
 
         if hasNotification {
-            setupGradientBorder()
+            gradientBorderLayer = makeGradientBorder(color: .systemOrange)
+        }
+        if workspace.isFocused && !hasNotification {
+            focusBorderLayer = makeGradientBorder(color: .systemBlue, lineWidth: 2.5)
         }
         setupSelectionBorder()
     }
@@ -191,25 +211,25 @@ final class WorkspaceCell: NSView {
         selectionBorderLayer = gradient
     }
 
-    private func setupGradientBorder() {
+    private func makeGradientBorder(color: NSColor, lineWidth: CGFloat = 2) -> CAGradientLayer {
         let gradient = CAGradientLayer()
         gradient.colors = [
-            NSColor.systemOrange.cgColor,
-            NSColor.systemOrange.withAlphaComponent(0.3).cgColor,
-            NSColor.systemOrange.withAlphaComponent(0.0).cgColor,
+            color.cgColor,
+            color.withAlphaComponent(0.3).cgColor,
+            color.withAlphaComponent(0.0).cgColor,
         ]
         gradient.locations = [0.0, 0.5, 1.0]
-        gradient.startPoint = CGPoint(x: 0, y: 1) // top-left in flipped coords
-        gradient.endPoint = CGPoint(x: 1, y: 0)   // bottom-right
+        gradient.startPoint = CGPoint(x: 0, y: 1)
+        gradient.endPoint = CGPoint(x: 1, y: 0)
 
         let shape = CAShapeLayer()
-        shape.lineWidth = 2
+        shape.lineWidth = lineWidth
         shape.fillColor = nil
-        shape.strokeColor = NSColor.white.cgColor // any opaque color for mask
+        shape.strokeColor = NSColor.white.cgColor
 
         gradient.mask = shape
         layer?.addSublayer(gradient)
-        gradientBorderLayer = gradient
+        return gradient
     }
 
     override func layout() {
@@ -218,6 +238,10 @@ final class WorkspaceCell: NSView {
         if let gradient = gradientBorderLayer {
             gradient.frame = bounds
             (gradient.mask as? CAShapeLayer)?.path = borderPath
+        }
+        if let focus = focusBorderLayer {
+            focus.frame = bounds
+            (focus.mask as? CAShapeLayer)?.path = borderPath
         }
         if let sel = selectionBorderLayer {
             sel.frame = bounds
@@ -265,20 +289,23 @@ final class WorkspaceCell: NSView {
         isSelected = selected
         if selected {
             gradientBorderLayer?.isHidden = hasNotification ? false : true
+            focusBorderLayer?.isHidden = true
             selectionBorderLayer?.isHidden = false
             layer?.borderColor = nil
             layer?.borderWidth = 0
             layer?.backgroundColor = NSColor.white.withAlphaComponent(0.18).cgColor
         } else if hasNotification {
             selectionBorderLayer?.isHidden = true
+            focusBorderLayer?.isHidden = true
             layer?.borderColor = nil
             layer?.borderWidth = 0
             layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.06).cgColor
             gradientBorderLayer?.isHidden = false
         } else if workspace.isFocused {
             selectionBorderLayer?.isHidden = true
-            layer?.borderColor = NSColor.systemBlue.cgColor
-            layer?.borderWidth = 2.5
+            focusBorderLayer?.isHidden = false
+            layer?.borderColor = nil
+            layer?.borderWidth = 0
             layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         } else if workspace.windows.isEmpty {
             selectionBorderLayer?.isHidden = true

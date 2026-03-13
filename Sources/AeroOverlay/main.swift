@@ -22,8 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel = OverlayPanel()
         viewController = OverlayViewController()
         panel.contentViewController = viewController
-        panel.contentView?.wantsLayer = true
-        panel.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
+        // Removed — rounding handled by the visual effect view directly
         panel.onDismiss = { [weak self] in self?.dismiss() }
 
         viewController.onSelectWorkspace = { [weak self] name in
