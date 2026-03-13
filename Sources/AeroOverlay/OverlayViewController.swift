@@ -197,7 +197,7 @@ final class OverlayViewController: NSViewController {
                     cell.leadingAnchor.constraint(equalTo: rowContainer.leadingAnchor, constant: xOffset),
                     cell.topAnchor.constraint(equalTo: rowContainer.topAnchor),
                     widthConstraint,
-                    cell.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
+                    cell.heightAnchor.constraint(equalToConstant: cell.requiredHeight),
                 ])
                 cells.append(cell)
                 xOffset += 160 // 150 + 10 spacing
@@ -206,24 +206,13 @@ final class OverlayViewController: NSViewController {
             // Container sized to fit content
             let totalWidth = max(0, xOffset - 10)
             rowContainer.widthAnchor.constraint(equalToConstant: totalWidth).isActive = true
-            // Pin height to tallest cell; blank cells match row height
-            for cell in cells {
-                let bottom = cell.bottomAnchor.constraint(lessThanOrEqualTo: rowContainer.bottomAnchor)
-                bottom.priority = .required
-                bottom.isActive = true
-                if cell.isBlank {
-                    // Force blank cells to fill the row height
-                    cell.bottomAnchor.constraint(equalTo: rowContainer.bottomAnchor).isActive = true
-                } else {
-                    let bottomPin = rowContainer.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
-                    bottomPin.priority = .defaultHigh
-                    bottomPin.isActive = true
-                }
+            // Set row container height to the tallest cell
+            let maxHeight = cells.map { $0.requiredHeight }.max() ?? 90
+            rowContainer.heightAnchor.constraint(equalToConstant: maxHeight).isActive = true
+            // Blank cells fill the row height
+            for cell in cells where cell.isBlank {
+                cell.heightAnchor.constraint(equalToConstant: maxHeight).isActive = true
             }
-
-            // Prevent row from stretching vertically
-            rowContainer.setContentHuggingPriority(.required, for: .vertical)
-            rowContainer.setContentCompressionResistancePriority(.required, for: .vertical)
 
             visibleGrid.append(cells)
             outerStack.addArrangedSubview(rowContainer)

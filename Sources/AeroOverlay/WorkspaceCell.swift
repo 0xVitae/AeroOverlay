@@ -35,6 +35,26 @@ final class WorkspaceCell: NSView {
     private var focusBorderLayer: CAGradientLayer?
     private var selectionBorderLayer: CAGradientLayer?
     private var badgeView: NSTextField?
+    private var isExpanded: Bool { Self.expandedWorkspaces.contains(workspace.name) }
+    private static let collapsedLimit = 3
+    static var expandedWorkspaces: Set<String> = []
+    private weak var toggleLabel: NSTextField?
+
+    /// Calculate the required height for this cell based on content
+    var requiredHeight: CGFloat {
+        if isBlank || workspace.windows.isEmpty {
+            return 90
+        }
+        // label top padding(8) + label(~20) + gap(6) + windows + bottom padding(8)
+        let visibleCount = isExpanded ? workspace.windows.count : min(workspace.windows.count, Self.collapsedLimit)
+        let rowHeight: CGFloat = 17
+        let rowSpacing: CGFloat = 3
+        let windowsHeight = CGFloat(visibleCount) * rowHeight + CGFloat(max(0, visibleCount - 1)) * rowSpacing
+        let hasToggle = workspace.windows.count > Self.collapsedLimit
+        let toggleHeight: CGFloat = hasToggle ? (14 + rowSpacing) : 0
+        let total = 8 + 20 + 6 + windowsHeight + toggleHeight + 8
+        return max(90, total)
+    }
 
     init(workspace: WorkspaceInfo, hasNotification: Bool = false, notifiedWindowIDs: Set<Int> = [], isBlank: Bool = false) {
         self.workspace = workspace
@@ -121,7 +141,7 @@ final class WorkspaceCell: NSView {
         // "TODO" badge inline on the top border
         if hasNotification {
             let badge = NSTextField(labelWithString: "  TODO  ")
-            badge.font = .systemFont(ofSize: 8, weight: .bold)
+            badge.font = .systemFont(ofSize: 8, weight: .semibold)
             badge.textColor = .white
             badge.wantsLayer = true
             badge.layer?.backgroundColor = NSColor.systemOrange.cgColor
@@ -147,13 +167,35 @@ final class WorkspaceCell: NSView {
         windowStack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(windowStack)
 
-        for win in workspace.windows.prefix(5) {
+        rebuildWindowList()
+
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            windowStack.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 6),
+            windowStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            windowStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+        ])
+
+        if hasNotification {
+            gradientBorderLayer = makeGradientBorder(color: .systemOrange)
+        }
+        if workspace.isFocused && !hasNotification {
+            focusBorderLayer = makeGradientBorder(color: .systemBlue, lineWidth: 2.5)
+        }
+        setupSelectionBorder()
+    }
+
+    private func rebuildWindowList() {
+        for sub in windowStack.arrangedSubviews { sub.removeFromSuperview() }
+
+        let limit = isExpanded ? workspace.windows.count : Self.collapsedLimit
+        for win in workspace.windows.prefix(limit) {
             let row = NSStackView()
             row.orientation = .horizontal
             row.spacing = 4
             row.alignment = .centerY
 
-            // App icon
             if let icon = WindowCapture.appIcon(for: win.appName) {
                 let iconView = NSImageView(image: icon)
                 iconView.translatesAutoresizingMaskIntoConstraints = false
@@ -162,7 +204,6 @@ final class WorkspaceCell: NSView {
                 row.addArrangedSubview(iconView)
             }
 
-            // Orange dot next to the specific terminal window that triggered the notification
             if notifiedWindowIDs.contains(win.windowID) {
                 let dot = NSView()
                 dot.wantsLayer = true
@@ -184,36 +225,39 @@ final class WorkspaceCell: NSView {
             windowStack.addArrangedSubview(row)
         }
 
-        if workspace.windows.count > 5 {
-            let moreLabel = NSTextField(labelWithString: "+\(workspace.windows.count - 5) more")
-            moreLabel.font = .systemFont(ofSize: 9)
-            moreLabel.textColor = .tertiaryLabelColor
-            windowStack.addArrangedSubview(moreLabel)
+        let extraCount = workspace.windows.count - Self.collapsedLimit
+        if extraCount > 0 {
+            let toggleText = isExpanded ? "Show less" : "\(extraCount) more apps..."
+            let toggle = NSTextField(labelWithString: toggleText)
+            toggle.font = .systemFont(ofSize: 9, weight: .medium)
+            toggle.textColor = .tertiaryLabelColor
+            windowStack.addArrangedSubview(toggle)
+            self.toggleLabel = toggle
         }
+    }
 
-        // Pin bottom to define intrinsic height
-        let bottomAnchorView: NSView = workspace.windows.isEmpty ? label : windowStack
-        let bottomPin = bottomAnchorView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
-        bottomPin.priority = .defaultHigh // Allow min height to win if content is tiny
-
-        NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            windowStack.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 6),
-            windowStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            windowStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
-            bottomPin,
-        ])
-
-        setContentHuggingPriority(.required, for: .vertical)
-
-        if hasNotification {
-            gradientBorderLayer = makeGradientBorder(color: .systemOrange)
+    @objc private func toggleExpand() {
+        if Self.expandedWorkspaces.contains(workspace.name) {
+            Self.expandedWorkspaces.remove(workspace.name)
+        } else {
+            Self.expandedWorkspaces.insert(workspace.name)
         }
-        if workspace.isFocused && !hasNotification {
-            focusBorderLayer = makeGradientBorder(color: .systemBlue, lineWidth: 2.5)
+        // Trigger full reload so panel resizes
+        guard let panel = window as? OverlayPanel,
+              let vc = panel.contentViewController as? OverlayViewController else { return }
+        vc.reload()
+        // Resize panel to fit new content
+        if let screen = NSScreen.main {
+            let screenFrame = screen.visibleFrame
+            panel.setFrame(NSRect(x: 0, y: 0, width: screenFrame.width, height: screenFrame.height), display: false)
+            panel.contentView?.layoutSubtreeIfNeeded()
+            let fittingSize = panel.contentView?.fittingSize ?? CGSize(width: 600, height: 400)
+            let panelWidth = min(fittingSize.width + 40, screenFrame.width * 0.9)
+            let panelHeight = min(fittingSize.height + 40, screenFrame.height * 0.9)
+            let x = screenFrame.midX - panelWidth / 2
+            let y = screenFrame.midY - panelHeight / 2
+            panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
         }
-        setupSelectionBorder()
     }
 
     private func setupSelectionBorder() {
@@ -277,6 +321,12 @@ final class WorkspaceCell: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        // Check if click is on the toggle label
+        if let toggle = toggleLabel, toggle.frame.contains(windowStack.convert(point, from: self)) {
+            toggleExpand()
+            return
+        }
         onClick?(workspace.name)
     }
 
