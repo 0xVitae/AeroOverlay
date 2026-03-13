@@ -61,10 +61,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleOptionKey() {
+        if isVisible {
+            dismiss()
+            lastOptionKeyDown = nil
+            return
+        }
         let now = Date()
         if let last = self.lastOptionKeyDown, now.timeIntervalSince(last) < self.doubleTapInterval {
             self.lastOptionKeyDown = nil
-            self.toggle()
+            self.show()
         } else {
             self.lastOptionKeyDown = now
         }
