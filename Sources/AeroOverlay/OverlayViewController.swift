@@ -6,6 +6,7 @@ final class OverlayViewController: NSViewController {
     private var visibleGrid: [[WorkspaceCell]] = [] // 2D grid of visible cells
     private var selRow = 0
     private var selCol = 0
+    private var cacheLabel: NSTextField?
 
     // Keyboard-matching grid layout
     private let gridRows: [[String]] = [
@@ -53,8 +54,10 @@ final class OverlayViewController: NSViewController {
         selCol = 0
 
         let allWorkspaces = client.fetchAll()
+        WorkspaceCell.buildTerminalCwdMap(allWorkspaces: allWorkspaces)
         let wsMap = Dictionary(uniqueKeysWithValues: allWorkspaces.map { ($0.name, $0) })
         let activeNames = Set(allWorkspaces.filter { !$0.windows.isEmpty }.map { $0.name })
+
         let notifiedWorkspaces = OverlayNotifications.pending()
 
         // Find the next inactive workspace in grid order
@@ -209,7 +212,8 @@ final class OverlayViewController: NSViewController {
         rightStack.addArrangedSubview(timeLabel)
 
         // Claude Code segmented usage bar (always shown, 0% if fetch fails)
-        let pct = ClaudeUsage.fetch()?.sevenDayPercent ?? 0
+        let usageInfo = ClaudeUsage.fetch()
+        let pct = usageInfo?.sevenDayPercent ?? 0
 
         let ccBar = NSStackView()
         ccBar.orientation = .horizontal
@@ -251,6 +255,20 @@ final class OverlayViewController: NSViewController {
         pctLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
         pctLabel.textColor = fillColor
         ccBar.addArrangedSubview(pctLabel)
+
+        if let cachedAt = usageInfo?.cachedAt {
+            let ago = RelativeDateTimeFormatter()
+            ago.unitsStyle = .abbreviated
+            let cacheLabel = NSTextField(labelWithString: ago.localizedString(for: cachedAt, relativeTo: Date()))
+            cacheLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+            cacheLabel.textColor = .tertiaryLabelColor
+            cacheLabel.isHidden = true
+            ccBar.addArrangedSubview(cacheLabel)
+
+            let click = NSClickGestureRecognizer(target: self, action: #selector(toggleCacheLabel))
+            pctLabel.addGestureRecognizer(click)
+            self.cacheLabel = cacheLabel
+        }
 
         rightStack.addArrangedSubview(ccBar)
 
@@ -348,4 +366,10 @@ final class OverlayViewController: NSViewController {
         let cell = visibleGrid[selRow][selCol]
         onSelectWorkspace?(cell.workspaceName)
     }
+
+    @objc private func toggleCacheLabel() {
+        guard let label = cacheLabel else { return }
+        label.isHidden.toggle()
+    }
+
 }

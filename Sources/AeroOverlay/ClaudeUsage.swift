@@ -6,6 +6,7 @@ struct ClaudeUsageInfo {
     let sevenDaySonnetPercent: Int?
     let extraUsedCredits: Double?
     let extraMonthlyLimit: Double?
+    let cachedAt: Date?
 }
 
 final class ClaudeUsage {
@@ -51,12 +52,14 @@ final class ClaudeUsage {
     private static func loadCache() -> ClaudeUsageInfo? {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: cachePath)),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let cachedAt: Date? = (dict["ts"] as? TimeInterval).map { Date(timeIntervalSince1970: $0) }
         return ClaudeUsageInfo(
             fiveHourPercent: dict["fiveHour"] as? Int,
             sevenDayPercent: dict["sevenDay"] as? Int,
             sevenDaySonnetPercent: dict["sevenDaySonnet"] as? Int,
             extraUsedCredits: dict["extraUsed"] as? Double,
-            extraMonthlyLimit: dict["extraLimit"] as? Double
+            extraMonthlyLimit: dict["extraLimit"] as? Double,
+            cachedAt: cachedAt
         )
     }
 
@@ -137,7 +140,8 @@ final class ClaudeUsage {
             sevenDayPercent: sevenDay,
             sevenDaySonnetPercent: sevenDaySonnet,
             extraUsedCredits: extraUsed,
-            extraMonthlyLimit: extraLimit
+            extraMonthlyLimit: extraLimit,
+            cachedAt: nil
         )
     }
 }
