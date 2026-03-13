@@ -142,16 +142,11 @@ final class OverlayViewController: NSViewController {
                     cell.leadingAnchor.constraint(equalTo: rowContainer.leadingAnchor),
                     cell.topAnchor.constraint(equalTo: rowContainer.topAnchor),
                     widthConstraint,
-                    cell.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
+                    cell.heightAnchor.constraint(equalToConstant: 90),
+                    cell.bottomAnchor.constraint(equalTo: rowContainer.bottomAnchor),
                 ])
                 cells.append(cell)
                 rowContainer.widthAnchor.constraint(equalToConstant: 150).isActive = true
-                let bottom = cell.bottomAnchor.constraint(lessThanOrEqualTo: rowContainer.bottomAnchor)
-                bottom.priority = .required
-                bottom.isActive = true
-                let bottomPin = rowContainer.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
-                bottomPin.priority = .defaultHigh
-                bottomPin.isActive = true
                 rowContainer.setContentHuggingPriority(.required, for: .vertical)
                 rowContainer.setContentCompressionResistancePriority(.required, for: .vertical)
                 visibleGrid.append(cells)
