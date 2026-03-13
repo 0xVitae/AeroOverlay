@@ -68,7 +68,13 @@ final class OverlayViewController: NSViewController {
         headerContainer.translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(labelWithString: "Workspaces")
-        title.font = .systemFont(ofSize: 20, weight: .semibold)
+        let titleFont = NSFont.systemFont(ofSize: 20, weight: .light)
+        title.font = titleFont
+        title.attributedStringValue = NSAttributedString(string: "Workspaces", attributes: [
+            .font: titleFont,
+            .foregroundColor: NSColor.white,
+            .kern: 3.0,
+        ])
         title.textColor = .white
         title.translatesAutoresizingMaskIntoConstraints = false
         headerContainer.addSubview(title)
