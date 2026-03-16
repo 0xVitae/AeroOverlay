@@ -12,7 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
     private var lastOptionKeyDown: Date?
-    private let doubleTapInterval: TimeInterval = 0.3
+    private let doubleTapInterval: TimeInterval = 0.25
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide from Dock

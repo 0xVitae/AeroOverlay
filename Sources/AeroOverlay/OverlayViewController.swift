@@ -7,6 +7,7 @@ final class OverlayViewController: NSViewController {
     private var selRow = 0
     private var selCol = 0
     private var cacheLabel: NSTextField?
+    private var isRefreshingUsage = false
 
     // Keyboard-matching grid layout
     private let gridRows: [[String]] = [
@@ -256,6 +257,20 @@ final class OverlayViewController: NSViewController {
         // Claude Code segmented usage bar (always shown, 0% if fetch fails)
         let usageInfo = ClaudeUsage.fetch()
         let pct = usageInfo?.sevenDayPercent ?? 0
+
+        // Refresh usage data in the background; reload once when fresh data arrives
+        if !isRefreshingUsage {
+            isRefreshingUsage = true
+            let oldPct = pct
+            ClaudeUsage.fetchAsync { [weak self] fresh in
+                guard let self = self else { return }
+                self.isRefreshingUsage = false
+                let newPct = fresh?.sevenDayPercent ?? 0
+                if newPct != oldPct {
+                    self.reload()
+                }
+            }
+        }
 
         let ccBar = NSStackView()
         ccBar.orientation = .horizontal
