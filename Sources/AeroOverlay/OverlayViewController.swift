@@ -96,16 +96,20 @@ final class OverlayViewController: NSViewController {
         title.translatesAutoresizingMaskIntoConstraints = false
         headerContainer.addSubview(title)
 
-        // Right-side stats
-        var statParts: [String] = []
-        statParts.append("CPU \(Int(stats.cpuUsage))%")
-        statParts.append(String(format: "RAM %.1f/%.0fGB", stats.memUsedGB, stats.memTotalGB))
-        if let batt = stats.batteryPercent {
-            let icon = stats.batteryCharging ? "⚡" : ""
-            statParts.append("\(icon)\(batt)%")
+        // Right-side stats (conditionally shown)
+        let statsLabel: NSTextField
+        if SettingsStore.shared.showSystemStats {
+            var statParts: [String] = []
+            statParts.append("CPU \(Int(stats.cpuUsage))%")
+            statParts.append(String(format: "RAM %.1f/%.0fGB", stats.memUsedGB, stats.memTotalGB))
+            if let batt = stats.batteryPercent {
+                let icon = stats.batteryCharging ? "⚡" : ""
+                statParts.append("\(icon)\(batt)%")
+            }
+            statsLabel = NSTextField(labelWithString: statParts.joined(separator: "  ·  "))
+        } else {
+            statsLabel = NSTextField(labelWithString: "")
         }
-
-        let statsLabel = NSTextField(labelWithString: statParts.joined(separator: "  ·  "))
         statsLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         statsLabel.textColor = .secondaryLabelColor
         statsLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -254,80 +258,82 @@ final class OverlayViewController: NSViewController {
         timeLabel.textColor = .tertiaryLabelColor
         rightStack.addArrangedSubview(timeLabel)
 
-        // Claude Code segmented usage bar (always shown, 0% if fetch fails)
-        let usageInfo = ClaudeUsage.fetch()
-        let pct = usageInfo?.sevenDayPercent ?? 0
+        // Claude Code segmented usage bar (conditionally shown)
+        if SettingsStore.shared.showClaudeUsage {
+            let usageInfo = ClaudeUsage.fetch()
+            let pct = usageInfo?.sevenDayPercent ?? 0
 
-        // Refresh usage data in the background; reload once when fresh data arrives
-        if !isRefreshingUsage {
-            isRefreshingUsage = true
-            let oldPct = pct
-            ClaudeUsage.fetchAsync { [weak self] fresh in
-                guard let self = self else { return }
-                self.isRefreshingUsage = false
-                let newPct = fresh?.sevenDayPercent ?? 0
-                if newPct != oldPct {
-                    self.reload()
+            // Refresh usage data in the background; reload once when fresh data arrives
+            if !isRefreshingUsage {
+                isRefreshingUsage = true
+                let oldPct = pct
+                ClaudeUsage.fetchAsync { [weak self] fresh in
+                    guard let self = self else { return }
+                    self.isRefreshingUsage = false
+                    let newPct = fresh?.sevenDayPercent ?? 0
+                    if newPct != oldPct {
+                        self.reload()
+                    }
                 }
             }
-        }
 
-        let ccBar = NSStackView()
-        ccBar.orientation = .horizontal
-        ccBar.spacing = 6
-        ccBar.alignment = .centerY
+            let ccBar = NSStackView()
+            ccBar.orientation = .horizontal
+            ccBar.spacing = 6
+            ccBar.alignment = .centerY
 
-        let ccLabel = NSTextField(labelWithString: "Claude Code")
-        ccLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
-        ccLabel.textColor = .secondaryLabelColor
-        ccBar.addArrangedSubview(ccLabel)
+            let ccLabel = NSTextField(labelWithString: "Claude Code")
+            ccLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+            ccLabel.textColor = .secondaryLabelColor
+            ccBar.addArrangedSubview(ccLabel)
 
-        let totalBlocks = 10
-        let filledBlocks = max(Int((Double(pct) / 100.0) * Double(totalBlocks) + 0.5), pct > 0 ? 1 : 0)
-        let fillColor: NSColor = pct >= 90 ? .systemRed : .systemOrange
+            let totalBlocks = 10
+            let filledBlocks = max(Int((Double(pct) / 100.0) * Double(totalBlocks) + 0.5), pct > 0 ? 1 : 0)
+            let fillColor: NSColor = pct >= 90 ? .systemRed : .systemOrange
 
-        let blocksRow = NSStackView()
-        blocksRow.orientation = .horizontal
-        blocksRow.spacing = 2
-        blocksRow.alignment = .centerY
+            let blocksRow = NSStackView()
+            blocksRow.orientation = .horizontal
+            blocksRow.spacing = 2
+            blocksRow.alignment = .centerY
 
-        for i in 0..<totalBlocks {
-            let block = NSView()
-            block.wantsLayer = true
-            block.layer?.cornerRadius = 2
-            if i < filledBlocks {
-                block.layer?.backgroundColor = fillColor.cgColor
-            } else {
-                block.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
+            for i in 0..<totalBlocks {
+                let block = NSView()
+                block.wantsLayer = true
+                block.layer?.cornerRadius = 2
+                if i < filledBlocks {
+                    block.layer?.backgroundColor = fillColor.cgColor
+                } else {
+                    block.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
+                }
+                block.translatesAutoresizingMaskIntoConstraints = false
+                block.widthAnchor.constraint(equalToConstant: 10).isActive = true
+                block.heightAnchor.constraint(equalToConstant: 12).isActive = true
+                blocksRow.addArrangedSubview(block)
             }
-            block.translatesAutoresizingMaskIntoConstraints = false
-            block.widthAnchor.constraint(equalToConstant: 10).isActive = true
-            block.heightAnchor.constraint(equalToConstant: 12).isActive = true
-            blocksRow.addArrangedSubview(block)
+
+            ccBar.addArrangedSubview(blocksRow)
+
+            let pctLabel = NSTextField(labelWithString: "\(pct)% of 7D")
+            pctLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
+            pctLabel.textColor = fillColor
+            ccBar.addArrangedSubview(pctLabel)
+
+            if let cachedAt = usageInfo?.cachedAt {
+                let ago = RelativeDateTimeFormatter()
+                ago.unitsStyle = .abbreviated
+                let cacheLabel = NSTextField(labelWithString: ago.localizedString(for: cachedAt, relativeTo: Date()))
+                cacheLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+                cacheLabel.textColor = .tertiaryLabelColor
+                cacheLabel.isHidden = true
+                ccBar.addArrangedSubview(cacheLabel)
+
+                let click = NSClickGestureRecognizer(target: self, action: #selector(toggleCacheLabel))
+                pctLabel.addGestureRecognizer(click)
+                self.cacheLabel = cacheLabel
+            }
+
+            rightStack.addArrangedSubview(ccBar)
         }
-
-        ccBar.addArrangedSubview(blocksRow)
-
-        let pctLabel = NSTextField(labelWithString: "\(pct)% of 7D")
-        pctLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
-        pctLabel.textColor = fillColor
-        ccBar.addArrangedSubview(pctLabel)
-
-        if let cachedAt = usageInfo?.cachedAt {
-            let ago = RelativeDateTimeFormatter()
-            ago.unitsStyle = .abbreviated
-            let cacheLabel = NSTextField(labelWithString: ago.localizedString(for: cachedAt, relativeTo: Date()))
-            cacheLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-            cacheLabel.textColor = .tertiaryLabelColor
-            cacheLabel.isHidden = true
-            ccBar.addArrangedSubview(cacheLabel)
-
-            let click = NSClickGestureRecognizer(target: self, action: #selector(toggleCacheLabel))
-            pctLabel.addGestureRecognizer(click)
-            self.cacheLabel = cacheLabel
-        }
-
-        rightStack.addArrangedSubview(ccBar)
 
         NSLayoutConstraint.activate([
             focusedLabel.leadingAnchor.constraint(equalTo: footerContainer.leadingAnchor),

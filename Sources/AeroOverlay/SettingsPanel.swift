@@ -1,8 +1,7 @@
 import AppKit
 
-final class OverlayPanel: NSPanel {
+final class SettingsPanel: NSPanel {
     var onDismiss: (() -> Void)?
-    var onOpenSettings: (() -> Void)?
 
     init() {
         super.init(
@@ -12,7 +11,7 @@ final class OverlayPanel: NSPanel {
             defer: true
         )
 
-        level = .floating
+        level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
         isFloatingPanel = true
         hidesOnDeactivate = false
         isOpaque = false
@@ -21,45 +20,32 @@ final class OverlayPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         isMovableByWindowBackground = false
         animationBehavior = .utilityWindow
-
     }
 
     override var canBecomeKey: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        // Command+, opens settings
-        if event.modifierFlags.contains(.command) && event.keyCode == 43 {
-            onOpenSettings?()
-            return
-        }
         if event.keyCode == 53 { // Escape
             onDismiss?()
-        } else if let vc = contentViewController as? OverlayViewController {
-            vc.handleKeyDown(event)
         } else {
+            // Forward to the settings VC (for hotkey recorder)
+            if let vc = contentViewController as? SettingsViewController {
+                vc.view.window?.makeFirstResponder(vc.view.window?.firstResponder)
+            }
             super.keyDown(with: event)
         }
     }
 
-    func showOverlay() {
+    func showSettings() {
         guard let screen = NSScreen.main else { return }
         let screenFrame = screen.visibleFrame
-
-        // First pass: set a large frame so content can layout freely
-        setFrame(NSRect(x: 0, y: 0, width: screenFrame.width, height: screenFrame.height), display: false)
-        contentView?.layoutSubtreeIfNeeded()
-
-        // Get the content's fitted size
-        let fittingSize = contentView?.fittingSize ?? CGSize(width: 600, height: 400)
-        let panelWidth = min(fittingSize.width + 40, screenFrame.width * 0.9)
-        let panelHeight = min(fittingSize.height + 40, screenFrame.height * 0.9)
-
+        let panelWidth: CGFloat = 420
+        let panelHeight: CGFloat = 420
         let x = screenFrame.midX - panelWidth / 2
         let y = screenFrame.midY - panelHeight / 2
 
         setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
 
-        // Fade in
         alphaValue = 0
         makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { ctx in
@@ -69,7 +55,7 @@ final class OverlayPanel: NSPanel {
         }
     }
 
-    func hideOverlay(completion: (() -> Void)? = nil) {
+    func hideSettings(completion: (() -> Void)? = nil) {
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.12
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)

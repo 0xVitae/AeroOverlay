@@ -19,7 +19,7 @@ struct MonitorInfo {
 }
 
 final class AeroSpaceClient {
-    private let aerospacePath = "/opt/homebrew/bin/aerospace"
+    private var aerospacePath: String { SettingsStore.shared.aerospacePath }
 
     func fetchAll() -> [WorkspaceInfo] {
         // Run initial queries in parallel
