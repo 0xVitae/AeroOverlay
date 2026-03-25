@@ -20,11 +20,16 @@ private extension NSBezierPath {
     }
 }
 
-final class WorkspaceCell: NSView {
+/// Custom pasteboard type for workspace drag-and-drop
+private let workspacePasteboardType = NSPasteboard.PasteboardType("com.aerooverlay.workspace")
+
+final class WorkspaceCell: NSView, NSDraggingSource {
     private let workspace: WorkspaceInfo
     private let label = NSTextField(labelWithString: "")
     private let windowStack = NSStackView()
     var onClick: ((String) -> Void)?
+    /// Called when windows are dragged from one workspace to another: (sourceWorkspace, targetWorkspace)
+    var onMoveWindows: ((String, String) -> Void)?
     private(set) var isSelected = false
     var isFocusedWorkspace: Bool { workspace.isFocused }
     var workspaceName: String { workspace.name }
@@ -34,11 +39,13 @@ final class WorkspaceCell: NSView {
     private var gradientBorderLayer: CAGradientLayer?
     private var focusBorderLayer: CAGradientLayer?
     private var selectionBorderLayer: CAGradientLayer?
+    private var dropHighlightLayer: CAGradientLayer?
     private var badgeView: NSTextField?
     private var isExpanded: Bool { Self.expandedWorkspaces.contains(workspace.name) }
     private static let collapsedLimit = 3
     static var expandedWorkspaces: Set<String> = []
     private weak var toggleLabel: NSTextField?
+    private var dragOrigin: NSPoint?
 
     /// Calculate the required height for this cell based on content
     var requiredHeight: CGFloat {
@@ -90,6 +97,9 @@ final class WorkspaceCell: NSView {
             label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
         ])
+
+        setupDropHighlight()
+        registerForDraggedTypes([workspacePasteboardType])
     }
 
     private func setupUI() {
@@ -184,6 +194,10 @@ final class WorkspaceCell: NSView {
             focusBorderLayer = makeGradientBorder(color: .systemBlue, lineWidth: 2.5)
         }
         setupSelectionBorder()
+        setupDropHighlight()
+
+        // Register as drop target for workspace drags
+        registerForDraggedTypes([workspacePasteboardType])
     }
 
     private func rebuildWindowList() {
@@ -318,16 +332,125 @@ final class WorkspaceCell: NSView {
             sel.frame = bounds
             (sel.mask as? CAShapeLayer)?.path = borderPath
         }
+        if let drop = dropHighlightLayer {
+            drop.frame = bounds
+            (drop.mask as? CAShapeLayer)?.path = borderPath
+        }
+    }
+
+    // MARK: - Drag and Drop
+
+    private func setupDropHighlight() {
+        let gradient = CAGradientLayer()
+        gradient.colors = [
+            NSColor.systemGreen.cgColor,
+            NSColor.systemGreen.withAlphaComponent(0.4).cgColor,
+            NSColor.systemGreen.withAlphaComponent(0.0).cgColor,
+        ]
+        gradient.locations = [0.0, 0.5, 1.0]
+        gradient.startPoint = CGPoint(x: 0, y: 1)
+        gradient.endPoint = CGPoint(x: 1, y: 0)
+
+        let shape = CAShapeLayer()
+        shape.lineWidth = 3
+        shape.fillColor = nil
+        shape.strokeColor = NSColor.white.cgColor
+
+        gradient.mask = shape
+        gradient.isHidden = true
+        layer?.addSublayer(gradient)
+        dropHighlightLayer = gradient
     }
 
     override func mouseDown(with event: NSEvent) {
+        dragOrigin = convert(event.locationInWindow, from: nil)
         let point = convert(event.locationInWindow, from: nil)
         // Check if click is on the toggle label
         if let toggle = toggleLabel, toggle.frame.contains(windowStack.convert(point, from: self)) {
             toggleExpand()
+            dragOrigin = nil
             return
         }
-        onClick?(workspace.name)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        // If we didn't drag, treat as a click
+        if dragOrigin != nil {
+            dragOrigin = nil
+            onClick?(workspace.name)
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let origin = dragOrigin else { return }
+        let current = convert(event.locationInWindow, from: nil)
+        let dx = current.x - origin.x
+        let dy = current.y - origin.y
+        // Require minimum drag distance before starting
+        guard sqrt(dx * dx + dy * dy) > 5 else { return }
+        // Only drag non-blank cells with windows
+        guard !isBlank, !workspace.windows.isEmpty else { return }
+        dragOrigin = nil // Prevent mouseUp click
+
+        let item = NSDraggingItem(pasteboardWriter: {
+            let pbItem = NSPasteboardItem()
+            pbItem.setString(workspace.name, forType: workspacePasteboardType)
+            return pbItem
+        }())
+
+        // Create a snapshot of this cell as the drag image
+        let image = NSImage(size: bounds.size)
+        image.lockFocus()
+        if let ctx = NSGraphicsContext.current?.cgContext {
+            ctx.setAlpha(0.7)
+            layer?.render(in: ctx)
+        }
+        image.unlockFocus()
+        item.setDraggingFrame(bounds, contents: image)
+
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    // NSDraggingSource
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        return context == .withinApplication ? .move : []
+    }
+
+    // NSDraggingDestination
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let sourceWorkspace = sender.draggingPasteboard.string(forType: workspacePasteboardType),
+              sourceWorkspace != workspace.name else {
+            return []
+        }
+        // Show drop highlight
+        dropHighlightLayer?.isHidden = false
+        layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.12).cgColor
+        return .move
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let sourceWorkspace = sender.draggingPasteboard.string(forType: workspacePasteboardType),
+              sourceWorkspace != workspace.name else {
+            return []
+        }
+        return .move
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dropHighlightLayer?.isHidden = true
+        // Restore original background
+        let alpha: CGFloat = workspace.isFocused ? 0.12 : (workspace.windows.isEmpty ? 0.03 : 0.07)
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(alpha).cgColor
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        dropHighlightLayer?.isHidden = true
+        guard let sourceWorkspace = sender.draggingPasteboard.string(forType: workspacePasteboardType),
+              sourceWorkspace != workspace.name else {
+            return false
+        }
+        onMoveWindows?(sourceWorkspace, workspace.name)
+        return true
     }
 
     // Hover effect

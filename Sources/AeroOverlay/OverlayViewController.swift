@@ -64,10 +64,16 @@ final class OverlayViewController: NSViewController {
         let allNamesInOrder = gridRows.flatMap { $0 }
         let nextInactive = allNamesInOrder.first { !activeNames.contains($0) }
 
-        // Visible set: active workspaces + one next inactive
+        // Visible set: active workspaces + one next inactive + first real workspace per row
+        let allWorkspaceNames = Set(allWorkspaces.map { $0.name })
         var visibleNames = activeNames
         if let next = nextInactive {
             visibleNames.insert(next)
+        }
+        for row in gridRows {
+            if let firstReal = row.first(where: { allWorkspaceNames.contains($0) }) {
+                visibleNames.insert(firstReal)
+            }
         }
 
         let outerStack = NSStackView()
@@ -138,6 +144,9 @@ final class OverlayViewController: NSViewController {
                 let ws = WorkspaceInfo(name: slot.name, windows: [], isFocused: false, monitorName: nil)
                 let cell = WorkspaceCell(workspace: ws, isBlank: true)
                 cell.onClick = { [weak self] name in self?.onSelectWorkspace?(name) }
+                cell.onMoveWindows = { [weak self] source, target in
+                    self?.moveAllWindows(from: source, to: target)
+                }
                 cell.translatesAutoresizingMaskIntoConstraints = false
                 cell.setContentCompressionResistancePriority(.init(1), for: .horizontal)
                 rowContainer.addSubview(cell)
@@ -192,6 +201,9 @@ final class OverlayViewController: NSViewController {
                 )
                 cell.onClick = { [weak self] name in
                     self?.onSelectWorkspace?(name)
+                }
+                cell.onMoveWindows = { [weak self] source, target in
+                    self?.moveAllWindows(from: source, to: target)
                 }
                 cell.translatesAutoresizingMaskIntoConstraints = false
                 cell.setContentCompressionResistancePriority(.init(1), for: .horizontal)
@@ -452,6 +464,30 @@ final class OverlayViewController: NSViewController {
         let cell = visibleGrid[selRow][selCol]
         guard !cell.isBlank else { return }
         onSelectWorkspace?(cell.workspaceName)
+    }
+
+    // MARK: - Drag and Drop
+
+    private func moveAllWindows(from source: String, to target: String) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.client.moveAllWindows(fromWorkspace: source, toWorkspace: target)
+            OverlayNotifications.moveNotifications(from: source, to: target)
+            DispatchQueue.main.async {
+                self?.reload()
+                // Resize panel to fit new content
+                if let panel = self?.view.window as? OverlayPanel, let screen = NSScreen.main {
+                    let screenFrame = screen.visibleFrame
+                    panel.setFrame(NSRect(x: 0, y: 0, width: screenFrame.width, height: screenFrame.height), display: false)
+                    panel.contentView?.layoutSubtreeIfNeeded()
+                    let fittingSize = panel.contentView?.fittingSize ?? CGSize(width: 600, height: 400)
+                    let panelWidth = min(fittingSize.width + 40, screenFrame.width * 0.9)
+                    let panelHeight = min(fittingSize.height + 40, screenFrame.height * 0.9)
+                    let x = screenFrame.midX - panelWidth / 2
+                    let y = screenFrame.midY - panelHeight / 2
+                    panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
+                }
+            }
+        }
     }
 
     @objc private func toggleCacheLabel() {

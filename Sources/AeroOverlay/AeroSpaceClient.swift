@@ -82,6 +82,23 @@ final class AeroSpaceClient {
         process.waitUntilExit()
     }
 
+    func moveWindow(windowID: Int, toWorkspace workspace: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: aerospacePath)
+        process.arguments = ["move-node-to-workspace", "--window-id", "\(windowID)", workspace]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+    }
+
+    func moveAllWindows(fromWorkspace source: String, toWorkspace target: String) {
+        let windows = listWindows(workspace: source)
+        for win in windows {
+            moveWindow(windowID: win.windowID, toWorkspace: target)
+        }
+    }
+
     // MARK: - Private
 
     private func listWorkspaces() -> [String] {

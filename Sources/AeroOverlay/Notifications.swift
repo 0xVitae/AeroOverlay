@@ -34,6 +34,25 @@ final class OverlayNotifications {
         Set(pendingEntries().filter { $0.workspace == workspace }.map { $0.windowID })
     }
 
+    /// Moves all notifications from one workspace to another.
+    static func moveNotifications(from source: String, to target: String) {
+        guard let contents = try? String(contentsOfFile: filePath, encoding: .utf8) else { return }
+        let updated = contents.split(separator: "\n").map(String.init).map { line -> String in
+            if line.hasPrefix("\(source):") {
+                let windowID = line.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
+                return "\(target):\(windowID)"
+            } else if line == source {
+                return target
+            }
+            return line
+        }.filter { !$0.isEmpty }
+        if updated.isEmpty {
+            try? FileManager.default.removeItem(atPath: filePath)
+        } else {
+            try? updated.joined(separator: "\n").write(toFile: filePath, atomically: true, encoding: .utf8)
+        }
+    }
+
     /// Clears the notification for a specific workspace.
     static func clear(workspace: String) {
         guard let contents = try? String(contentsOfFile: filePath, encoding: .utf8) else { return }
