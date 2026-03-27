@@ -9,9 +9,34 @@ final class SettingsStore {
         case doubleTapInterval
         case hotkeyKeyCode
         case hotkeyModifiers
+        case hotkeyMode // "doubleTap", "bothOptions", "custom"
         case showClaudeUsage
         case showSystemStats
         case aerospacePath
+    }
+
+    enum HotkeyMode: String {
+        case doubleTap = "doubleTap"
+        case bothOptions = "bothOptions"
+        case custom = "custom"
+    }
+
+    var hotkeyMode: HotkeyMode {
+        get {
+            if let raw = defaults.string(forKey: Key.hotkeyMode.rawValue),
+               let mode = HotkeyMode(rawValue: raw) {
+                return mode
+            }
+            // Migration: if hotkeyKeyCode exists, it's custom mode
+            if defaults.object(forKey: Key.hotkeyKeyCode.rawValue) != nil {
+                return .custom
+            }
+            return .doubleTap
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Key.hotkeyMode.rawValue)
+            notify()
+        }
     }
 
     var doubleTapInterval: TimeInterval {
@@ -60,6 +85,7 @@ final class SettingsStore {
 
     /// Human-readable string for the current hotkey
     var hotkeyDisplayString: String {
+        if hotkeyMode == .bothOptions { return "Left ⌥ + Right ⌥" }
         guard let keyCode = hotkeyKeyCode else { return "Double-tap Option" }
         var parts: [String] = []
         let mods = hotkeyModifiers
@@ -75,6 +101,16 @@ final class SettingsStore {
     func clearHotkey() {
         defaults.removeObject(forKey: Key.hotkeyKeyCode.rawValue)
         defaults.removeObject(forKey: Key.hotkeyModifiers.rawValue)
+        defaults.removeObject(forKey: Key.hotkeyMode.rawValue)
+        defaults.synchronize()
+        notify()
+    }
+
+    /// Set hotkey to Left Option + Right Option mode
+    func setBothOptionsHotkey() {
+        defaults.removeObject(forKey: Key.hotkeyKeyCode.rawValue)
+        defaults.removeObject(forKey: Key.hotkeyModifiers.rawValue)
+        defaults.set(HotkeyMode.bothOptions.rawValue, forKey: Key.hotkeyMode.rawValue)
         defaults.synchronize()
         notify()
     }

@@ -122,12 +122,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let m = localHotkeyMonitor { NSEvent.removeMonitor(m); localHotkeyMonitor = nil }
 
         let settings = SettingsStore.shared
-        if let keyCode = settings.hotkeyKeyCode {
-            // Custom hotkey mode
-            let requiredMods = settings.hotkeyModifiers
-            setupCustomHotkeyMonitor(keyCode: keyCode, modifiers: requiredMods)
-        } else {
-            // Default: double-tap Option
+        switch settings.hotkeyMode {
+        case .bothOptions:
+            setupBothOptionsMonitor()
+        case .custom:
+            if let keyCode = settings.hotkeyKeyCode {
+                setupCustomHotkeyMonitor(keyCode: keyCode, modifiers: settings.hotkeyModifiers)
+            } else {
+                setupOptionKeyMonitor()
+            }
+        case .doubleTap:
             setupOptionKeyMonitor()
         }
     }
@@ -145,6 +149,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.show()
         } else {
             self.lastOptionKeyDown = now
+        }
+    }
+
+    private func handleBothOptions(_ event: NSEvent) {
+        // Device-dependent modifier flags: NX_DEVICELALTKEYMASK = 0x20, NX_DEVICERALTKEYMASK = 0x40
+        let rawFlags = event.modifierFlags.rawValue
+        let leftOption = rawFlags & 0x00000020 != 0
+        let rightOption = rawFlags & 0x00000040 != 0
+        if leftOption && rightOption {
+            toggle()
+        }
+    }
+
+    private func setupBothOptionsMonitor() {
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleBothOptions(event)
+        }
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleBothOptions(event)
+            return event
         }
     }
 

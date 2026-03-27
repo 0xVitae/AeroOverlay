@@ -68,6 +68,7 @@ final class SettingsViewController: NSViewController {
         hotkeyRecorder.widthAnchor.constraint(equalToConstant: 200).isActive = true
         hotkeyRecorder.heightAnchor.constraint(equalToConstant: 28).isActive = true
         hotkeyRecorder.onHotkeySet = { [weak self] keyCode, mods in
+            self?.settings.hotkeyMode = .custom
             self?.settings.hotkeyKeyCode = keyCode
             self?.settings.hotkeyModifiers = mods
             self?.hotkeyRecorder.updateLabel()
@@ -80,11 +81,11 @@ final class SettingsViewController: NSViewController {
         }
         hotkeyRow.addArrangedSubview(hotkeyRecorder)
 
-        let defaultBtn = NSButton(title: "Default", target: self, action: #selector(resetHotkeyToDefault))
-        defaultBtn.bezelStyle = .rounded
-        defaultBtn.setButtonType(.momentaryPushIn)
-        defaultBtn.font = .systemFont(ofSize: 11)
-        hotkeyRow.addArrangedSubview(defaultBtn)
+        let moreBtn = NSButton(title: "Presets ▾", target: self, action: #selector(showMoreHotkeys(_:)))
+        moreBtn.bezelStyle = .rounded
+        moreBtn.setButtonType(.momentaryPushIn)
+        moreBtn.font = .systemFont(ofSize: 11)
+        hotkeyRow.addArrangedSubview(moreBtn)
 
         stack.addArrangedSubview(hotkeyRow)
 
@@ -180,11 +181,67 @@ final class SettingsViewController: NSViewController {
     }
 
     private func updateIntervalVisibility() {
-        intervalRow?.isHidden = settings.hotkeyKeyCode != nil
+        intervalRow?.isHidden = settings.hotkeyMode != .doubleTap
     }
 
     @objc private func resetHotkeyToDefault() {
         settings.clearHotkey()
+        hotkeyRecorder.updateLabel()
+        updateIntervalVisibility()
+    }
+
+    @objc private func showMoreHotkeys(_ sender: NSButton) {
+        let menu = NSMenu()
+
+        let doubleTapItem = NSMenuItem(title: "Double-tap ⌥ (Default)", action: #selector(resetHotkeyToDefault), keyEquivalent: "")
+        doubleTapItem.target = self
+        if settings.hotkeyMode == .doubleTap {
+            doubleTapItem.state = .on
+        }
+        menu.addItem(doubleTapItem)
+
+        let bothOptionsItem = NSMenuItem(title: "Left ⌥ + Right ⌥", action: #selector(setBothOptions), keyEquivalent: "")
+        bothOptionsItem.target = self
+        if settings.hotkeyMode == .bothOptions {
+            bothOptionsItem.state = .on
+        }
+        menu.addItem(bothOptionsItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Preset custom hotkeys
+        let presets: [(String, UInt16, NSEvent.ModifierFlags)] = [
+            ("⌃⌥ Space", 49, [.control, .option]),
+            ("⌘⇧ Space", 49, [.command, .shift]),
+            ("⌃⌥ A", 0, [.control, .option]),
+            ("⌥⇧ O", 31, [.option, .shift]),
+        ]
+        for (title, keyCode, mods) in presets {
+            let item = NSMenuItem(title: title, action: #selector(selectPresetHotkey(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = PresetHotkey(keyCode: keyCode, modifiers: mods)
+            if settings.hotkeyMode == .custom,
+               settings.hotkeyKeyCode == keyCode,
+               settings.hotkeyModifiers == mods {
+                item.state = .on
+            }
+            menu.addItem(item)
+        }
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender)
+    }
+
+    @objc private func setBothOptions() {
+        settings.setBothOptionsHotkey()
+        hotkeyRecorder.updateLabel()
+        updateIntervalVisibility()
+    }
+
+    @objc private func selectPresetHotkey(_ sender: NSMenuItem) {
+        guard let preset = sender.representedObject as? PresetHotkey else { return }
+        settings.hotkeyMode = .custom
+        settings.hotkeyKeyCode = preset.keyCode
+        settings.hotkeyModifiers = preset.modifiers
         hotkeyRecorder.updateLabel()
         updateIntervalVisibility()
     }
@@ -256,6 +313,15 @@ final class SettingsViewController: NSViewController {
         image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
         image.resizingMode = .stretch
         return image
+    }
+}
+
+private class PresetHotkey: NSObject {
+    let keyCode: UInt16
+    let modifiers: NSEvent.ModifierFlags
+    init(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
     }
 }
 
